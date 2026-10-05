@@ -1,7 +1,8 @@
-"""Whisper-i FLEURS-az test dəstində işlədir, xam çıxışları diskə yazır və hesablayır.
+"""Whisper və ya MMS-i FLEURS-az test dəstində işlədir, xam çıxışları diskə yazır və hesablayır.
 
 İstifadə (Colab-da, GPU ilə):
     python -m eval.run_eval --model openai/whisper-large-v3 --n 200 --seed 42
+    python -m eval.run_eval --backend mms --model facebook/mms-1b-all --n 200 --seed 42
 
 Nəticə results/ qovluğuna yazılır. Eyni parametrlərlə yenidən işlətsən, model
 təkrar işləmir (keşdən oxunur), --force ilə məcbur edə bilərsən.
@@ -60,9 +61,37 @@ def transcribe_whisper(ds, model_name: str, batch_size: int):
     return [o["text"] for o in outputs], seconds, time.time() - start
 
 
+def transcribe_mms(ds, model_name: str, lang: str):
+    """Meta MMS (wav2vec2 + dil adapteri). Hər cümlə ayrıca emal olunur (batch=1),
+    ona görə RTF real söhbətə daha yaxındır, amma Whisper-in batch=8 RTF-i ilə birbaşa müqayisə olunmur."""
+    import torch
+    from transformers import AutoProcessor, Wav2Vec2ForCTC
+
+    processor = AutoProcessor.from_pretrained(model_name)
+    model = Wav2Vec2ForCTC.from_pretrained(model_name)
+    # Rəsmi model kartındakı qayda: tokenizer-in dilini seç və həmin dilin adapterini yüklə
+    processor.tokenizer.set_target_lang(lang)
+    model.load_adapter(lang)
+    model = model.to("cuda").eval()
+
+    hyps, seconds = [], []
+    start = time.time()
+    for s in ds:
+        array, sr = s["audio"]["array"], s["audio"]["sampling_rate"]
+        seconds.append(len(array) / sr)
+        inputs = processor(array, sampling_rate=sr, return_tensors="pt").to("cuda")
+        with torch.no_grad():
+            logits = model(**inputs).logits
+        ids = torch.argmax(logits, dim=-1)[0]
+        hyps.append(processor.decode(ids))
+    return hyps, seconds, time.time() - start
+
+
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument("--backend", choices=["whisper", "mms"], default="whisper")
     p.add_argument("--model", default="openai/whisper-large-v3")
+    p.add_argument("--lang", default="azj-script_latin", help="yalnız MMS üçün: dil adapteri kodu")
     p.add_argument("--n", type=int, default=200)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--batch-size", type=int, default=8)
@@ -76,7 +105,10 @@ def main():
         print(f"Keşdə tapıldı, model işləmir: {path}\n")
     else:
         ds = load_fleurs(args.n, args.seed)
-        hyps, seconds, elapsed = transcribe_whisper(ds, args.model, args.batch_size)
+        if args.backend == "mms":
+            hyps, seconds, elapsed = transcribe_mms(ds, args.model, args.lang)
+        else:
+            hyps, seconds, elapsed = transcribe_whisper(ds, args.model, args.batch_size)
 
         with open(path, "w", encoding="utf-8") as f:
             for s, hyp, sec in zip(ds, hyps, seconds):
@@ -90,10 +122,11 @@ def main():
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
         meta = {
+            "backend": args.backend,
             "model": args.model,
             "n": len(hyps),
             "seed": args.seed,
-            "batch_size": args.batch_size,
+            "batch_size": 1 if args.backend == "mms" else args.batch_size,
             "elapsed_sec": elapsed,
         }
         path.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")

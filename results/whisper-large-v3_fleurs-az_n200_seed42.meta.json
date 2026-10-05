@@ -1,0 +1,7 @@
+{
+  "model": "openai/whisper-large-v3",
+  "n": 200,
+  "seed": 42,
+  "batch_size": 8,
+  "elapsed_sec": 666.8444366455078
+}
