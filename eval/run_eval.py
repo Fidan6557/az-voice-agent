@@ -34,7 +34,9 @@ def gender_of(ds, sample) -> str:
     return ds.features["gender"].int2str(g) if isinstance(g, int) else str(g)
 
 
-def transcribe_whisper(ds, model_name: str, batch_size: int):
+def transcribe_whisper(ds, model_name: str, batch_size: int, **gen_kwargs):
+    """gen_kwargs: generate-ə əlavə parametrlər (məs. num_beams=1, max_new_tokens=200).
+    Verilməsə, əvvəlki baza ölçmələrindəki davranış saxlanılır."""
     import torch
     from transformers import pipeline
 
@@ -56,7 +58,7 @@ def transcribe_whisper(ds, model_name: str, batch_size: int):
     outputs = asr(
         audios,
         batch_size=batch_size,
-        generate_kwargs={"language": "azerbaijani", "task": "transcribe"},
+        generate_kwargs={"language": "azerbaijani", "task": "transcribe", **gen_kwargs},
     )
     return [o["text"] for o in outputs], seconds, time.time() - start
 

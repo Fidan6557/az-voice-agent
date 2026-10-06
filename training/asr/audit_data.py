@@ -138,7 +138,7 @@ def asr_check(items, n, model="openai/whisper-large-v3"):
 
     subset = items[:n]
     ds = [{"audio": {"array": i["array"], "sampling_rate": i["sr"]}} for i in subset]
-    hyps, _, _ = transcribe_whisper(ds, model, batch_size=8)
+    hyps, _, _ = transcribe_whisper(ds, model, batch_size=4, num_beams=1, max_new_tokens=200)
     refs = [i["text"] for i in subset]
 
     s = score(refs, hyps)
